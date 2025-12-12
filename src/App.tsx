@@ -1,8 +1,10 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
-import Editor from './components/Editor';
+import Editor, { EditorHandle } from './components/Editor';
 import MenuBar from './components/MenuBar';
+import SearchPanel from './components/SearchPanel';
+import StatusBar from './components/StatusBar';
 import { FileData } from './types';
 
 const getFileExtension = (filename: string): string => {
@@ -27,7 +29,11 @@ const getLanguageFromExtension = (ext: string): string => {
   return extMap[ext] || 'text';
 };
 
+const RECENT_FILES_KEY = 'thetext_recent_files';
+const MAX_RECENT_FILES = 10;
+
 function App() {
+  const editorRef = useRef<EditorHandle>(null);
   const [currentFile, setCurrentFile] = useState<FileData>({
     path: null,
     name: 'Untitled',
@@ -35,6 +41,25 @@ function App() {
     language: 'text',
     isDirty: false,
   });
+  const [showSearchPanel, setShowSearchPanel] = useState(false);
+  const [cursorPosition, setCursorPosition] = useState({ line: 1, column: 1 });
+  const [recentFiles, setRecentFiles] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem(RECENT_FILES_KEY);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const addToRecentFiles = useCallback((filePath: string) => {
+    setRecentFiles((prev) => {
+      const filtered = prev.filter((f) => f !== filePath);
+      const updated = [filePath, ...filtered].slice(0, MAX_RECENT_FILES);
+      localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
 
   const handleNew = useCallback(() => {
     if (currentFile.isDirty) {
@@ -80,12 +105,40 @@ function App() {
           language,
           isDirty: false,
         });
+        addToRecentFiles(selected);
       }
     } catch (error) {
       console.error('Error opening file:', error);
       alert('Failed to open file: ' + error);
     }
-  }, []);
+  }, [addToRecentFiles]);
+
+  const handleOpenRecent = useCallback(async (filePath: string) => {
+    try {
+      const content = await readTextFile(filePath);
+      const fileName = filePath.split('/').pop() || filePath.split('\\').pop() || 'Untitled';
+      const ext = getFileExtension(fileName);
+      const language = getLanguageFromExtension(ext);
+
+      setCurrentFile({
+        path: filePath,
+        name: fileName,
+        content,
+        language,
+        isDirty: false,
+      });
+      addToRecentFiles(filePath);
+    } catch (error) {
+      console.error('Error opening recent file:', error);
+      alert('Failed to open file: ' + error);
+      // Remove from recent files if it failed to open
+      setRecentFiles((prev) => {
+        const updated = prev.filter((f) => f !== filePath);
+        localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(updated));
+        return updated;
+      });
+    }
+  }, [addToRecentFiles]);
 
   const handleSave = useCallback(async () => {
     try {
@@ -147,6 +200,50 @@ function App() {
     }));
   }, []);
 
+  const handleUndo = useCallback(() => {
+    editorRef.current?.undo();
+  }, []);
+
+  const handleRedo = useCallback(() => {
+    editorRef.current?.redo();
+  }, []);
+
+  const handleCut = useCallback(() => {
+    editorRef.current?.cut();
+  }, []);
+
+  const handleCopy = useCallback(() => {
+    editorRef.current?.copy();
+  }, []);
+
+  const handlePaste = useCallback(() => {
+    editorRef.current?.paste();
+  }, []);
+
+  const handleFind = useCallback((query: string, options: { caseSensitive: boolean }) => {
+    editorRef.current?.find(query, options);
+  }, []);
+
+  const handleFindNext = useCallback(() => {
+    editorRef.current?.findNext();
+  }, []);
+
+  const handleFindPrevious = useCallback(() => {
+    editorRef.current?.findPrevious();
+  }, []);
+
+  const handleReplace = useCallback((query: string, replacement: string, options: { caseSensitive: boolean }) => {
+    editorRef.current?.replace(query, replacement, options);
+  }, []);
+
+  const handleReplaceAll = useCallback((query: string, replacement: string, options: { caseSensitive: boolean }) => {
+    editorRef.current?.replaceAll(query, replacement, options);
+  }, []);
+
+  const handleCursorChange = useCallback((line: number, column: number) => {
+    setCursorPosition({ line, column });
+  }, []);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -168,6 +265,14 @@ function App() {
               handleSave();
             }
             break;
+          case 'f':
+            e.preventDefault();
+            setShowSearchPanel(true);
+            break;
+          case 'h':
+            e.preventDefault();
+            setShowSearchPanel(true);
+            break;
         }
       }
     };
@@ -183,16 +288,42 @@ function App() {
         onOpen={handleOpen}
         onSave={handleSave}
         onSaveAs={handleSaveAs}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        onCut={handleCut}
+        onCopy={handleCopy}
+        onPaste={handlePaste}
+        onOpenRecent={handleOpenRecent}
+        recentFiles={recentFiles}
         currentFileName={currentFile.name}
         hasUnsavedChanges={currentFile.isDirty}
       />
+      {showSearchPanel && (
+        <SearchPanel
+          onClose={() => setShowSearchPanel(false)}
+          onFind={handleFind}
+          onReplace={handleReplace}
+          onReplaceAll={handleReplaceAll}
+          onFindNext={handleFindNext}
+          onFindPrevious={handleFindPrevious}
+        />
+      )}
       <div className="flex-1 overflow-hidden">
         <Editor
+          ref={editorRef}
           initialContent={currentFile.content}
           onChange={handleContentChange}
+          onCursorChange={handleCursorChange}
           language={currentFile.language}
         />
       </div>
+      <StatusBar
+        line={cursorPosition.line}
+        column={cursorPosition.column}
+        fileSize={new Blob([currentFile.content]).size}
+        encoding="UTF-8"
+        language={currentFile.language}
+      />
     </div>
   );
 }
