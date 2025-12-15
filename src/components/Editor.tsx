@@ -15,6 +15,7 @@ interface EditorProps {
   onChange?: (content: string) => void;
   onCursorChange?: (line: number, column: number) => void;
   language?: string;
+  fontSize?: number;
 }
 
 export interface EditorHandle {
@@ -28,6 +29,7 @@ export interface EditorHandle {
   findPrevious: () => void;
   replace: (query: string, replacement: string, options: { caseSensitive: boolean }) => void;
   replaceAll: (query: string, replacement: string, options: { caseSensitive: boolean }) => void;
+  setCursorPosition: (line: number, column: number) => void;
   getView: () => EditorView | null;
 }
 
@@ -58,7 +60,7 @@ const getLanguageExtension = (lang: string) => {
   }
 };
 
-const Editor = forwardRef<EditorHandle, EditorProps>(({ initialContent = '', onChange, onCursorChange, language = 'text' }, ref) => {
+const Editor = forwardRef<EditorHandle, EditorProps>(({ initialContent = '', onChange, onCursorChange, language = 'text', fontSize = 16 }, ref) => {
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const [isReady, setIsReady] = useState(false);
@@ -157,6 +159,22 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ initialContent = '', onC
         }
       }
     },
+    setCursorPosition: (line: number, column: number) => {
+      if (viewRef.current) {
+        try {
+          const doc = viewRef.current.state.doc;
+          if (line > doc.lines) return;
+          const lineObj = doc.line(line);
+          const pos = Math.min(lineObj.from + column - 1, lineObj.to);
+          viewRef.current.dispatch({
+            selection: { anchor: pos, head: pos },
+            scrollIntoView: true,
+          });
+        } catch (error) {
+          console.error('Error setting cursor position:', error);
+        }
+      }
+    },
     getView: () => viewRef.current,
   }));
 
@@ -185,7 +203,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ initialContent = '', onC
         EditorView.theme({
           '&': {
             height: '100%',
-            fontSize: '16px',
+            fontSize: `${fontSize}px`,
           },
           '.cm-scroller': {
             overflow: 'auto',
@@ -215,7 +233,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ initialContent = '', onC
       view.destroy();
       viewRef.current = null;
     };
-  }, [language]);
+  }, [language, fontSize, onChange, onCursorChange]);
 
   // Update content when initialContent changes
   useEffect(() => {

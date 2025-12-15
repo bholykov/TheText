@@ -4,6 +4,7 @@ interface StatusBarProps {
   fileSize: number;
   encoding: string;
   language: string;
+  wordCount?: number;
 }
 
 const formatFileSize = (bytes: number): string => {
@@ -14,11 +15,12 @@ const formatFileSize = (bytes: number): string => {
   return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
 };
 
-export default function StatusBar({ line, column, fileSize, encoding, language }: StatusBarProps) {
+export default function StatusBar({ line, column, fileSize, encoding, language, wordCount }: StatusBarProps) {
   return (
     <div className="bg-gray-100 dark:bg-gray-800 border-t border-gray-300 dark:border-gray-700 px-4 py-1 flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
       <div className="flex items-center gap-4">
         <span>Ln {line}, Col {column}</span>
+        {wordCount !== undefined && <span>{wordCount} {wordCount === 1 ? 'word' : 'words'}</span>}
         <span>{formatFileSize(fileSize)}</span>
       </div>
       <div className="flex items-center gap-4">
