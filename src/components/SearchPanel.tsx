@@ -22,12 +22,6 @@ export default function SearchPanel({
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [showReplace, setShowReplace] = useState(false);
 
-  const handleFind = () => {
-    if (searchQuery) {
-      onFind(searchQuery, { caseSensitive });
-    }
-  };
-
   const handleReplace = () => {
     if (searchQuery) {
       onReplace(searchQuery, replaceText, { caseSensitive });

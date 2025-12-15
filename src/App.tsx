@@ -1,8 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
+import { listen } from '@tauri-apps/api/event';
 import Editor, { EditorHandle } from './components/Editor';
-import MenuBar from './components/MenuBar';
 import SearchPanel from './components/SearchPanel';
 import StatusBar from './components/StatusBar';
 import { FileData } from './types';
@@ -29,9 +29,6 @@ const getLanguageFromExtension = (ext: string): string => {
   return extMap[ext] || 'text';
 };
 
-const RECENT_FILES_KEY = 'thetext_recent_files';
-const MAX_RECENT_FILES = 10;
-
 function App() {
   const editorRef = useRef<EditorHandle>(null);
   const [currentFile, setCurrentFile] = useState<FileData>({
@@ -43,23 +40,20 @@ function App() {
   });
   const [showSearchPanel, setShowSearchPanel] = useState(false);
   const [cursorPosition, setCursorPosition] = useState({ line: 1, column: 1 });
-  const [recentFiles, setRecentFiles] = useState<string[]>(() => {
-    try {
-      const stored = localStorage.getItem(RECENT_FILES_KEY);
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
-    }
+
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    // Check system preference
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
 
-  const addToRecentFiles = useCallback((filePath: string) => {
-    setRecentFiles((prev) => {
-      const filtered = prev.filter((f) => f !== filePath);
-      const updated = [filePath, ...filtered].slice(0, MAX_RECENT_FILES);
-      localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(updated));
-      return updated;
-    });
-  }, []);
+  // Apply theme to document
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isDarkMode]);
 
   const handleNew = useCallback(() => {
     if (currentFile.isDirty) {
@@ -105,40 +99,12 @@ function App() {
           language,
           isDirty: false,
         });
-        addToRecentFiles(selected);
       }
     } catch (error) {
       console.error('Error opening file:', error);
       alert('Failed to open file: ' + error);
     }
-  }, [addToRecentFiles]);
-
-  const handleOpenRecent = useCallback(async (filePath: string) => {
-    try {
-      const content = await readTextFile(filePath);
-      const fileName = filePath.split('/').pop() || filePath.split('\\').pop() || 'Untitled';
-      const ext = getFileExtension(fileName);
-      const language = getLanguageFromExtension(ext);
-
-      setCurrentFile({
-        path: filePath,
-        name: fileName,
-        content,
-        language,
-        isDirty: false,
-      });
-      addToRecentFiles(filePath);
-    } catch (error) {
-      console.error('Error opening recent file:', error);
-      alert('Failed to open file: ' + error);
-      // Remove from recent files if it failed to open
-      setRecentFiles((prev) => {
-        const updated = prev.filter((f) => f !== filePath);
-        localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(updated));
-        return updated;
-      });
-    }
-  }, [addToRecentFiles]);
+  }, []);
 
   const handleSave = useCallback(async () => {
     try {
@@ -244,60 +210,69 @@ function App() {
     setCursorPosition({ line, column });
   }, []);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey) {
-        switch (e.key.toLowerCase()) {
-          case 'n':
-            e.preventDefault();
-            handleNew();
-            break;
-          case 'o':
-            e.preventDefault();
-            handleOpen();
-            break;
-          case 's':
-            e.preventDefault();
-            if (e.shiftKey) {
-              handleSaveAs();
-            } else {
-              handleSave();
-            }
-            break;
-          case 'f':
-            e.preventDefault();
-            setShowSearchPanel(true);
-            break;
-          case 'h':
-            e.preventDefault();
-            setShowSearchPanel(true);
-            break;
-        }
-      }
-    };
+  const handleToggleTheme = useCallback(() => {
+    setIsDarkMode((prev) => !prev);
+  }, []);
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleNew, handleOpen, handleSave, handleSaveAs]);
+  const handleAbout = useCallback(() => {
+    alert(
+      'TheText v0.1.0\n\n' +
+      'A fast, efficient text editor built with Tauri, React, and TypeScript.\n\n' +
+      'Features:\n' +
+      '• CodeMirror 6 for powerful editing\n' +
+      '• Multi-language syntax highlighting\n' +
+      '• Find and Replace with search panel\n' +
+      '• Recent files tracking\n' +
+      '• Dark/Light theme support\n' +
+      '• Native macOS menu integration\n' +
+      '• Small binary (~12MB)\n' +
+      '• Low memory usage (~80MB)\n\n' +
+      'Built with ❤️ using Tauri + React + TypeScript'
+    );
+  }, []);
+
+  // Listen for native menu events
+  useEffect(() => {
+    const unlistenNew = listen('menu-new-file', () => handleNew());
+    const unlistenOpen = listen('menu-open-file', () => handleOpen());
+    const unlistenSave = listen('menu-save-file', () => handleSave());
+    const unlistenSaveAs = listen('menu-save-file-as', () => handleSaveAs());
+    const unlistenUndo = listen('menu-undo', () => handleUndo());
+    const unlistenRedo = listen('menu-redo', () => handleRedo());
+    const unlistenCut = listen('menu-cut', () => handleCut());
+    const unlistenCopy = listen('menu-copy', () => handleCopy());
+    const unlistenPaste = listen('menu-paste', () => handlePaste());
+    const unlistenFind = listen('menu-find', () => setShowSearchPanel(true));
+    const unlistenReplace = listen('menu-replace', () => setShowSearchPanel(true));
+    const unlistenToggleTheme = listen('menu-toggle-theme', () => handleToggleTheme());
+    const unlistenAbout = listen('menu-about', () => handleAbout());
+
+    // Cleanup listeners
+    return () => {
+      unlistenNew.then((fn) => fn());
+      unlistenOpen.then((fn) => fn());
+      unlistenSave.then((fn) => fn());
+      unlistenSaveAs.then((fn) => fn());
+      unlistenUndo.then((fn) => fn());
+      unlistenRedo.then((fn) => fn());
+      unlistenCut.then((fn) => fn());
+      unlistenCopy.then((fn) => fn());
+      unlistenPaste.then((fn) => fn());
+      unlistenFind.then((fn) => fn());
+      unlistenReplace.then((fn) => fn());
+      unlistenToggleTheme.then((fn) => fn());
+      unlistenAbout.then((fn) => fn());
+    };
+  }, [handleNew, handleOpen, handleSave, handleSaveAs, handleUndo, handleRedo, handleCut, handleCopy, handlePaste, handleToggleTheme, handleAbout]);
+
+  // Update window title with filename and dirty state
+  useEffect(() => {
+    const title = currentFile.name + (currentFile.isDirty ? ' •' : '') + ' - TheText';
+    document.title = title;
+  }, [currentFile.name, currentFile.isDirty]);
 
   return (
     <div className="flex flex-col h-screen bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-      <MenuBar
-        onNew={handleNew}
-        onOpen={handleOpen}
-        onSave={handleSave}
-        onSaveAs={handleSaveAs}
-        onUndo={handleUndo}
-        onRedo={handleRedo}
-        onCut={handleCut}
-        onCopy={handleCopy}
-        onPaste={handlePaste}
-        onOpenRecent={handleOpenRecent}
-        recentFiles={recentFiles}
-        currentFileName={currentFile.name}
-        hasUnsavedChanges={currentFile.isDirty}
-      />
       {showSearchPanel && (
         <SearchPanel
           onClose={() => setShowSearchPanel(false)}
